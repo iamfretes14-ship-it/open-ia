@@ -24,6 +24,7 @@ pub(crate) struct SessionState {
     /// TODO(owen): This is a temporary solution to avoid updating a thread's updated_at
     /// timestamp when resuming a session. Remove this once SQLite is in place.
     pub(crate) initial_context_seeded: bool,
+    pub(crate) next_mcp_tool_selection: Option<Vec<String>>,
 }
 
 impl SessionState {
@@ -38,6 +39,7 @@ impl SessionState {
             dependency_env: HashMap::new(),
             mcp_dependency_prompted: HashSet::new(),
             initial_context_seeded: false,
+            next_mcp_tool_selection: None,
         }
     }
 
@@ -124,6 +126,14 @@ impl SessionState {
 
     pub(crate) fn dependency_env(&self) -> HashMap<String, String> {
         self.dependency_env.clone()
+    }
+
+    pub(crate) fn set_next_mcp_tool_selection(&mut self, tool_names: Vec<String>) {
+        self.next_mcp_tool_selection = Some(tool_names);
+    }
+
+    pub(crate) fn take_next_mcp_tool_selection(&mut self) -> Option<Vec<String>> {
+        self.next_mcp_tool_selection.take()
     }
 }
 
