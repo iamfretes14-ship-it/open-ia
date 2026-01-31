@@ -37,6 +37,7 @@ pub use config_requirements::ConfigRequirementsToml;
 pub use config_requirements::McpServerIdentity;
 pub use config_requirements::McpServerRequirement;
 pub use config_requirements::RequirementSource;
+pub use config_requirements::ResidencyRequirement;
 pub use config_requirements::SandboxModeRequirement;
 pub use config_requirements::Sourced;
 pub use diagnostics::ConfigError;
@@ -101,7 +102,7 @@ pub async fn load_config_layers_state(
     cwd: Option<AbsolutePathBuf>,
     cli_overrides: &[(String, TomlValue)],
     overrides: LoaderOverrides,
-    cloud_requirements: Option<CloudRequirementsLoader>, // TODO(gt): Once exec and app-server are wired up, we can remove the option.
+    cloud_requirements: CloudRequirementsLoader,
 ) -> io::Result<ConfigLayerStack> {
     let mut config_requirements_toml = ConfigRequirementsWithSources::default();
 
@@ -114,9 +115,7 @@ pub async fn load_config_layers_state(
     )
     .await?;
 
-    if let Some(loader) = cloud_requirements
-        && let Some(requirements) = loader.get().await
-    {
+    if let Some(requirements) = cloud_requirements.get().await {
         config_requirements_toml
             .merge_unset_fields(RequirementSource::CloudRequirements, requirements);
     }
