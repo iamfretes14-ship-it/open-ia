@@ -34,6 +34,7 @@ use toml::Value as TomlValue;
 pub use cloud_requirements::CloudRequirementsLoader;
 pub use config_requirements::ConfigRequirements;
 pub use config_requirements::ConfigRequirementsToml;
+pub use config_requirements::ConstrainedWithSource;
 pub use config_requirements::McpServerIdentity;
 pub use config_requirements::McpServerRequirement;
 pub use config_requirements::RequirementSource;
@@ -425,7 +426,9 @@ async fn load_requirements_from_legacy_scheme(
 ///   empty array, which indicates that root detection should be disabled).
 /// - Returns an error if `project_root_markers` is specified but is not an
 ///   array of strings.
-fn project_root_markers_from_config(config: &TomlValue) -> io::Result<Option<Vec<String>>> {
+pub(crate) fn project_root_markers_from_config(
+    config: &TomlValue,
+) -> io::Result<Option<Vec<String>>> {
     let Some(table) = config.as_table() else {
         return Ok(None);
     };
@@ -454,7 +457,7 @@ fn project_root_markers_from_config(config: &TomlValue) -> io::Result<Option<Vec
     Ok(Some(markers))
 }
 
-fn default_project_root_markers() -> Vec<String> {
+pub(crate) fn default_project_root_markers() -> Vec<String> {
     DEFAULT_PROJECT_ROOT_MARKERS
         .iter()
         .map(ToString::to_string)
