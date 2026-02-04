@@ -8,8 +8,11 @@ use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
+use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
 use codex_protocol::dynamic_tools::DynamicToolCallRequest;
 use codex_protocol::dynamic_tools::DynamicToolResponse;
+use codex_protocol::dynamic_tools::DynamicToolResult;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::protocol::EventMsg;
 use serde_json::Value;
 use tokio::sync::oneshot;
@@ -55,10 +58,21 @@ impl ToolHandler for DynamicToolHandler {
                 )
             })?;
 
+        let DynamicToolResponse {
+            result, success, ..
+        } = response;
+        let (content, content_items) = match result {
+            DynamicToolResult::Output { output } => (output, None),
+            DynamicToolResult::ContentItems { content_items } => (
+                content_items_to_text(Some(&content_items)).unwrap_or_default(),
+                Some(content_items.into_iter().map(map_content_item).collect()),
+            ),
+        };
+
         Ok(ToolOutput::Function {
-            content: response.output,
-            content_items: None,
-            success: Some(response.success),
+            content,
+            content_items,
+            success: Some(success),
         })
     }
 }
@@ -95,4 +109,74 @@ async fn request_dynamic_tool(
     });
     session.send_event(turn_context, event).await;
     rx_response.await.ok()
+}
+
+fn content_items_to_text(
+    content_items: Option<&[DynamicToolCallOutputContentItem]>,
+) -> Option<String> {
+    let mut text = Vec::new();
+
+    for item in content_items.unwrap_or_default() {
+        if let DynamicToolCallOutputContentItem::InputText { text: segment } = item
+            && !segment.trim().is_empty()
+        {
+            text.push(segment.as_str());
+        }
+    }
+
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.join("\n"))
+    }
+}
+
+fn map_content_item(item: DynamicToolCallOutputContentItem) -> FunctionCallOutputContentItem {
+    match item {
+        DynamicToolCallOutputContentItem::InputText { text } => {
+            FunctionCallOutputContentItem::InputText { text }
+        }
+        DynamicToolCallOutputContentItem::InputImage { image_url } => {
+            FunctionCallOutputContentItem::InputImage { image_url }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn content_items_to_text_uses_text_content_items() {
+        let content_items = vec![
+            DynamicToolCallOutputContentItem::InputText {
+                text: "line 1".to_string(),
+            },
+            DynamicToolCallOutputContentItem::InputImage {
+                image_url: "data:image/png;base64,AAA".to_string(),
+            },
+            DynamicToolCallOutputContentItem::InputText {
+                text: "line 2".to_string(),
+            },
+        ];
+
+        let output = content_items_to_text(Some(&content_items)).unwrap_or_default();
+        assert_eq!(output, "line 1\nline 2");
+    }
+
+    #[test]
+    fn content_items_to_text_ignores_empty_and_image_only_content_items() {
+        let content_items = vec![
+            DynamicToolCallOutputContentItem::InputText {
+                text: "   ".to_string(),
+            },
+            DynamicToolCallOutputContentItem::InputImage {
+                image_url: "data:image/png;base64,AAA".to_string(),
+            },
+        ];
+
+        let output = content_items_to_text(Some(&content_items));
+        assert_eq!(output, None);
+    }
 }

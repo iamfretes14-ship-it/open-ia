@@ -2826,8 +2826,35 @@ pub struct DynamicToolCallParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct DynamicToolCallResponse {
-    pub output: String,
+    pub result: DynamicToolCallResult,
     pub success: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type")]
+#[ts(export_to = "v2/")]
+pub enum DynamicToolCallResult {
+    /// Preferred structured tool output (for example text + images) that is
+    /// forwarded directly to the model as content items.
+    #[serde(rename_all = "camelCase")]
+    ContentItems {
+        content_items: Vec<DynamicToolCallOutputContentItem>,
+    },
+    /// Plain-text tool output.
+    #[serde(rename_all = "camelCase")]
+    Output { output: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type")]
+#[ts(export_to = "v2/")]
+pub enum DynamicToolCallOutputContentItem {
+    #[serde(rename_all = "camelCase")]
+    InputText { text: String },
+    #[serde(rename_all = "camelCase")]
+    InputImage { image_url: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3186,6 +3213,57 @@ mod tests {
                 "responseTooManyFailedAttempts": {
                     "httpStatusCode": 401
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn dynamic_tool_response_serializes_content_items() {
+        let value = serde_json::to_value(DynamicToolCallResponse {
+            result: DynamicToolCallResult::ContentItems {
+                content_items: vec![DynamicToolCallOutputContentItem::InputText {
+                    text: "dynamic-ok".to_string(),
+                }],
+            },
+            success: true,
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "result": {
+                    "type": "contentItems",
+                    "contentItems": [
+                        {
+                            "type": "inputText",
+                            "text": "dynamic-ok"
+                        }
+                    ]
+                },
+                "success": true,
+            })
+        );
+    }
+
+    #[test]
+    fn dynamic_tool_response_serializes_plain_text_output() {
+        let value = serde_json::to_value(DynamicToolCallResponse {
+            result: DynamicToolCallResult::Output {
+                output: "dynamic-ok".to_string(),
+            },
+            success: true,
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            json!({
+                "result": {
+                    "type": "output",
+                    "output": "dynamic-ok"
+                },
+                "success": true,
             })
         );
     }
