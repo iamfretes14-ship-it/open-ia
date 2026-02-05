@@ -1107,14 +1107,19 @@ impl Session {
         }
     }
 
-    pub(crate) async fn set_next_mcp_tool_selection(&self, tool_names: Vec<String>) {
+    pub(crate) async fn merge_mcp_tool_selection(&self, tool_names: Vec<String>) -> Vec<String> {
         let mut state = self.state.lock().await;
-        state.set_next_mcp_tool_selection(tool_names);
+        state.merge_mcp_tool_selection(tool_names)
     }
 
-    pub(crate) async fn take_next_mcp_tool_selection(&self) -> Option<Vec<String>> {
+    pub(crate) async fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
+        let state = self.state.lock().await;
+        state.get_mcp_tool_selection()
+    }
+
+    pub(crate) async fn clear_mcp_tool_selection(&self) {
         let mut state = self.state.lock().await;
-        state.take_next_mcp_tool_selection()
+        state.clear_mcp_tool_selection();
     }
 
     async fn record_initial_history(&self, conversation_history: InitialHistory) {
@@ -3842,7 +3847,7 @@ async fn run_sampling_request(
         .await?;
     let search_tool_enabled = turn_context.config.features.enabled(Feature::SearchTool);
     if search_tool_enabled {
-        if let Some(selected_tools) = sess.take_next_mcp_tool_selection().await {
+        if let Some(selected_tools) = sess.get_mcp_tool_selection().await {
             mcp_tools = filter_mcp_tools_by_name(mcp_tools, &selected_tools);
         } else {
             mcp_tools.clear();
@@ -4676,6 +4681,8 @@ pub(super) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -
 pub(crate) use tests::make_session_and_context;
 #[cfg(test)]
 pub(crate) use tests::make_session_and_context_with_rx;
+#[cfg(test)]
+pub(crate) use tests::make_session_configuration_for_tests;
 
 #[cfg(test)]
 mod tests {
@@ -5482,6 +5489,46 @@ mod tests {
             "test".to_string(),
             session_source,
         )
+    }
+
+    pub(crate) async fn make_session_configuration_for_tests() -> SessionConfiguration {
+        let codex_home = tempfile::tempdir().expect("create temp dir");
+        let config = build_test_config(codex_home.path()).await;
+        let config = Arc::new(config);
+        let model = ModelsManager::get_model_offline(config.model.as_deref());
+        let model_info = ModelsManager::construct_model_info_offline(model.as_str(), &config);
+        let reasoning_effort = config.model_reasoning_effort;
+        let collaboration_mode = CollaborationMode {
+            mode: ModeKind::Default,
+            settings: Settings {
+                model,
+                reasoning_effort,
+                developer_instructions: None,
+            },
+        };
+
+        SessionConfiguration {
+            provider: config.model_provider.clone(),
+            collaboration_mode,
+            model_reasoning_summary: config.model_reasoning_summary,
+            developer_instructions: config.developer_instructions.clone(),
+            user_instructions: config.user_instructions.clone(),
+            personality: config.personality,
+            base_instructions: config
+                .base_instructions
+                .clone()
+                .unwrap_or_else(|| model_info.get_model_instructions(config.personality)),
+            compact_prompt: config.compact_prompt.clone(),
+            approval_policy: config.approval_policy.clone(),
+            sandbox_policy: config.sandbox_policy.clone(),
+            windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
+            cwd: config.cwd.clone(),
+            codex_home: config.codex_home.clone(),
+            thread_name: None,
+            original_config_do_not_use: Arc::clone(&config),
+            session_source: SessionSource::Exec,
+            dynamic_tools: Vec::new(),
+        }
     }
 
     pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {

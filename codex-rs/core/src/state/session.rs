@@ -24,7 +24,7 @@ pub(crate) struct SessionState {
     /// TODO(owen): This is a temporary solution to avoid updating a thread's updated_at
     /// timestamp when resuming a session. Remove this once SQLite is in place.
     pub(crate) initial_context_seeded: bool,
-    pub(crate) next_mcp_tool_selection: Option<Vec<String>>,
+    pub(crate) active_mcp_tool_selection: Option<Vec<String>>,
 }
 
 impl SessionState {
@@ -39,7 +39,7 @@ impl SessionState {
             dependency_env: HashMap::new(),
             mcp_dependency_prompted: HashSet::new(),
             initial_context_seeded: false,
-            next_mcp_tool_selection: None,
+            active_mcp_tool_selection: None,
         }
     }
 
@@ -128,12 +128,30 @@ impl SessionState {
         self.dependency_env.clone()
     }
 
-    pub(crate) fn set_next_mcp_tool_selection(&mut self, tool_names: Vec<String>) {
-        self.next_mcp_tool_selection = Some(tool_names);
+    pub(crate) fn merge_mcp_tool_selection(&mut self, tool_names: Vec<String>) -> Vec<String> {
+        if tool_names.is_empty() {
+            return self.active_mcp_tool_selection.clone().unwrap_or_default();
+        }
+
+        let mut merged = self.active_mcp_tool_selection.take().unwrap_or_default();
+        let mut seen: HashSet<String> = merged.iter().cloned().collect();
+
+        for tool_name in tool_names {
+            if seen.insert(tool_name.clone()) {
+                merged.push(tool_name);
+            }
+        }
+
+        self.active_mcp_tool_selection = Some(merged.clone());
+        merged
     }
 
-    pub(crate) fn take_next_mcp_tool_selection(&mut self) -> Option<Vec<String>> {
-        self.next_mcp_tool_selection.take()
+    pub(crate) fn get_mcp_tool_selection(&self) -> Option<Vec<String>> {
+        self.active_mcp_tool_selection.clone()
+    }
+
+    pub(crate) fn clear_mcp_tool_selection(&mut self) {
+        self.active_mcp_tool_selection = None;
     }
 }
 
@@ -149,4 +167,80 @@ fn merge_rate_limit_fields(
         snapshot.plan_type = previous.and_then(|prior| prior.plan_type);
     }
     snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codex::make_session_configuration_for_tests;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn merge_mcp_tool_selection_deduplicates_and_preserves_order() {
+        let session_configuration = make_session_configuration_for_tests().await;
+        let mut state = SessionState::new(session_configuration);
+
+        let merged = state.merge_mcp_tool_selection(vec![
+            "mcp__rmcp__echo".to_string(),
+            "mcp__rmcp__image".to_string(),
+            "mcp__rmcp__echo".to_string(),
+        ]);
+        assert_eq!(
+            merged,
+            vec![
+                "mcp__rmcp__echo".to_string(),
+                "mcp__rmcp__image".to_string(),
+            ]
+        );
+
+        let merged = state.merge_mcp_tool_selection(vec![
+            "mcp__rmcp__image".to_string(),
+            "mcp__rmcp__search".to_string(),
+        ]);
+        assert_eq!(
+            merged,
+            vec![
+                "mcp__rmcp__echo".to_string(),
+                "mcp__rmcp__image".to_string(),
+                "mcp__rmcp__search".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_mcp_tool_selection_empty_input_is_noop() {
+        let session_configuration = make_session_configuration_for_tests().await;
+        let mut state = SessionState::new(session_configuration);
+        state.merge_mcp_tool_selection(vec![
+            "mcp__rmcp__echo".to_string(),
+            "mcp__rmcp__image".to_string(),
+        ]);
+
+        let merged = state.merge_mcp_tool_selection(Vec::new());
+        assert_eq!(
+            merged,
+            vec![
+                "mcp__rmcp__echo".to_string(),
+                "mcp__rmcp__image".to_string(),
+            ]
+        );
+        assert_eq!(
+            state.get_mcp_tool_selection(),
+            Some(vec![
+                "mcp__rmcp__echo".to_string(),
+                "mcp__rmcp__image".to_string(),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_mcp_tool_selection_removes_selection() {
+        let session_configuration = make_session_configuration_for_tests().await;
+        let mut state = SessionState::new(session_configuration);
+        state.merge_mcp_tool_selection(vec!["mcp__rmcp__echo".to_string()]);
+
+        state.clear_mcp_tool_selection();
+
+        assert_eq!(state.get_mcp_tool_selection(), None);
+    }
 }
