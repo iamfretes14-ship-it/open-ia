@@ -1896,7 +1896,10 @@ impl Session {
                 }
                 RolloutItem::Compacted(compacted) => {
                     if let Some(replacement) = &compacted.replacement_history {
-                        history.replace(replacement.clone());
+                        history.replace(
+                            self.process_compacted_history(turn_context, replacement.clone())
+                                .await,
+                        );
                     } else {
                         let user_messages = collect_user_messages(history.raw_items());
                         let rebuilt = compact::build_compacted_history(
@@ -1914,6 +1917,15 @@ impl Session {
             }
         }
         history.raw_items().to_vec()
+    }
+
+    pub(crate) async fn process_compacted_history(
+        &self,
+        turn_context: &TurnContext,
+        compacted_history: Vec<ResponseItem>,
+    ) -> Vec<ResponseItem> {
+        let initial_context = self.build_initial_context(turn_context).await;
+        compact::process_compacted_history(compacted_history, &initial_context)
     }
 
     /// Append ResponseItems to the in-memory conversation history only.
@@ -4913,6 +4925,74 @@ mod tests {
             .await;
 
         assert_eq!(expected, reconstructed);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_history_refreshes_developer_instructions_for_replacement_history() {
+        let (session, turn_context) = make_session_and_context().await;
+        let rollout_items = vec![RolloutItem::Compacted(CompactedItem {
+            message: String::new(),
+            replacement_history: Some(vec![
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "summary".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+                ResponseItem::Message {
+                    id: None,
+                    role: "developer".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "stale developer instructions".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+            ]),
+        })];
+
+        let reconstructed = session
+            .reconstruct_history_from_rollout(&turn_context, &rollout_items)
+            .await;
+
+        let has_stale_message = reconstructed.iter().any(|item| {
+            matches!(
+                item,
+                ResponseItem::Message { role, content, .. }
+                    if role == "developer"
+                        && content.iter().any(|part| matches!(
+                            part,
+                            ContentItem::InputText { text }
+                                if text == "stale developer instructions"
+                        ))
+            )
+        });
+        assert!(!has_stale_message);
+
+        let summary_position = reconstructed.iter().position(|item| {
+            matches!(
+                item,
+                ResponseItem::Message { role, content, .. }
+                    if role == "user"
+                        && content.iter().any(|part| matches!(
+                            part,
+                            ContentItem::InputText { text } if text == "summary"
+                        ))
+            )
+        });
+        let summary_position = summary_position.expect("summary should be present");
+        let initial_context = session.build_initial_context(&turn_context).await;
+        let expected_developer_messages: Vec<ResponseItem> = initial_context
+            .into_iter()
+            .filter(
+                |item| matches!(item, ResponseItem::Message { role, .. } if role == "developer"),
+            )
+            .collect();
+        let actual_after_summary = reconstructed[summary_position + 1..].to_vec();
+        assert_eq!(actual_after_summary, expected_developer_messages);
     }
 
     #[tokio::test]
