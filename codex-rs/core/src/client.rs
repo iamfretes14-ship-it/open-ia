@@ -33,7 +33,6 @@ use codex_otel::OtelManager;
 
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
-use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -70,7 +69,6 @@ use crate::model_provider_info::WireApi;
 use crate::tools::spec::create_tools_json_for_responses_api;
 use crate::transport_manager::TransportManager;
 
-pub const WEB_SEARCH_ELIGIBLE_HEADER: &str = "x-oai-web-search-eligible";
 pub const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
 pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
 pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
@@ -649,16 +647,6 @@ fn build_responses_headers(
     turn_metadata_header: Option<&HeaderValue>,
 ) -> ApiHeaderMap {
     let mut headers = experimental_feature_headers(config);
-    headers.insert(
-        WEB_SEARCH_ELIGIBLE_HEADER,
-        HeaderValue::from_static(
-            if matches!(config.web_search_mode, Some(WebSearchMode::Disabled)) {
-                "false"
-            } else {
-                "true"
-            },
-        ),
-    );
     if let Some(turn_state) = turn_state
         && let Some(state) = turn_state.get()
         && let Ok(header_value) = HeaderValue::from_str(state)
